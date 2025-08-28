@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 
 	"github.com/tetratelabs/wazero"
@@ -9,8 +10,8 @@ import (
 )
 
 // InstantiateImportStubs instantiateImportStubs inspects the compiled module and creates host modules for each imported module,
-// exporting no-op functions that match the imported function signatures. This satisfies imports such as
-// "__wbindgen_placeholder__" without needing to know exact names ahead of time.
+// exporting functions that match the imported function signatures. For most imports we export no-op stubs, but
+// for getrandom-related imports we provide real implementations that fill memory with random bytes.
 func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazero.CompiledModule) error {
 	imports := c.ImportedFunctions()
 	if len(imports) == 0 {
@@ -32,13 +33,40 @@ func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazer
 
 		params := def.ParamTypes()
 		results := def.ResultTypes()
-		// Create a no-op function body that writes zeroes to result slots.
-		stub := api.GoFunc(func(ctx context.Context, stack []uint64) {
-			// Nothing to do. Leave default zero values in stack for results.
-			// If there are results, ensure at least that we don't panic.
-			_ = stack
-		})
-		builder.NewFunctionBuilder().WithGoFunction(stub, params, results).Export(name)
+
+		// Handle specific imports robustly using substring matches (wasm-bindgen adds mangled suffixes).
+		switch {
+		case containsAny(name, []string{"randomFillSync", "getRandomValues"}):
+			// Entropy providers from getrandom -> fill (ptr,len) with random bytes
+			builder.NewFunctionBuilder().WithGoModuleFunction(api.GoModuleFunc(func(ctx context.Context, m api.Module, stack []uint64) {
+				mem := m.Memory()
+				if mem == nil {
+					return
+				}
+				if len(stack) >= 2 {
+					ptr := uint32(stack[0])
+					ln := uint32(stack[1])
+					if ln > 0 {
+						buf := make([]byte, ln)
+						_, _ = rand.Read(buf)
+						_ = mem.Write(ptr, buf)
+					}
+				}
+			}), params, results).Export(name)
+		case containsAny(name, []string{"wbg_crypto_", "wbg_msCrypto_", "wbg_process_", "wbg_versions_", "wbg_node_", "wbg_require_"}):
+			// Return a non-zero value as a fake JS object handle or truthy flag when the signature expects a result.
+			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
+				if len(results) > 0 {
+					// Set first result to 1 (works for i32/externref-like indices in wasm-bindgen glue)
+					stack[0] = 1
+				}
+			}), params, results).Export(name)
+		default:
+			// Default: no-op stub
+			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
+				_ = stack
+			}), params, results).Export(name)
+		}
 	}
 
 	// Instantiate each host module.
@@ -48,4 +76,38 @@ func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazer
 		}
 	}
 	return nil
+}
+
+// containsAny reports whether s contains any of the substrings in subs.
+func containsAny(s string, subs []string) bool {
+	for _, sub := range subs {
+		if len(sub) > 0 && contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// small helper to avoid importing strings for a single Contains
+func contains(s, sub string) bool {
+	// simple substring search
+	return len(sub) <= len(s) && (s == sub || (len(s) > 0 && (indexOf(s, sub) >= 0)))
+}
+
+func hasSuffix(s, suf string) bool {
+	if len(suf) > len(s) {
+		return false
+	}
+	return s[len(s)-len(suf):] == suf
+}
+
+// indexOf returns the index of sub in s or -1 if not present.
+func indexOf(s, sub string) int {
+	// naive search is enough for our small set
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
 }

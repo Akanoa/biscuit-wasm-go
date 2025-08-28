@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	keypairModule "biscuit-wasm-go/crypto/keypair"
@@ -24,6 +25,27 @@ func closeWasmModule(module api.Module, goContext context.Context) {
 	if module.Close(goContext) != nil {
 		panic("failed to close module")
 	}
+}
+
+func createkeypair(module api.Module, goContext context.Context) {
+	keypair := keypairModule.Invoke(module, goContext)
+
+	if err := keypair.New(keypairModule.Ed25519); err != nil {
+		println("keypair.New error:", err.Error())
+	}
+
+	privateKey, err := keypair.GetPrivateKey()
+	if err != nil {
+		println("keypair.GetPrivateKey error:", err.Error())
+	}
+
+	fmt.Printf("Privatekey %+v\n", privateKey)
+
+	privateKeyString, err := privateKey.ToString()
+	if err != nil {
+		println("privateKey.ToString error:", err.Error())
+	}
+	fmt.Printf("PrivateKeyString %s\n", privateKeyString)
 }
 
 func main() {
@@ -49,8 +71,8 @@ func main() {
 		panic(err)
 	}
 
-	// Disable automatic start function. WithStartFunctions() means don't call any start.
-	wasmConfig := wazero.NewModuleConfig().WithStartFunctions()
+	// Use default module config so the module's start function (if any) runs.
+	wasmConfig := wazero.NewModuleConfig()
 
 	module, err := runtime.InstantiateModule(goContext, compiled, wasmConfig)
 	if err != nil {
@@ -58,9 +80,8 @@ func main() {
 	}
 	defer closeWasmModule(module, goContext)
 
-	keypair := keypairModule.Invoke(module, goContext)
-
-	keypair.New(keypairModule.Ed25519)
+	createkeypair(module, goContext)
+	createkeypair(module, goContext)
 
 	//add := module.ExportedFunction(addFunction)
 	//if add == nil {

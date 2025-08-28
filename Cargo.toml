@@ -1,0 +1,17 @@
+[package]
+name = "biscuit-wasm-go"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+zeroize = "1.8.1"
+biscuit-wasm = {git = "https://github.com/eclipse-biscuit/biscuit-wasm.git", rev = "2dc0467c07d85f8044bbb202c79a724f9aa8a1d7"}
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

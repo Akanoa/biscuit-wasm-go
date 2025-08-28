@@ -14,7 +14,7 @@ import (
 // many bytes to read/write in guest memory.
 var taLen = map[uint32]uint32{}
 
-// instantiateImportStubs inspects the compiled module and creates host modules for each imported module,
+// InstantiateImportStubs inspects the compiled module and creates host modules for each imported module,
 // exporting no-op functions that match the imported function signatures. This satisfies imports such as
 // "__wbindgen_placeholder__" without needing to know exact names ahead of time.
 func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazero.CompiledModule) error {
@@ -45,26 +45,6 @@ func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazer
 
 		params := def.ParamTypes()
 		results := def.ResultTypes()
-
-		// Only implement the real random byte fillers and required wasm-bindgen helpers.
-		if modName == "__wbindgen_externref_xform__" {
-			switch name {
-			case "__wbindgen_externref_table_grow":
-				// (param i32) (result i32): identity
-				builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-					// leave stack[0]
-				}), params, results).Export(name)
-				continue
-			case "__wbindgen_externref_table_set_null":
-				// (param i32) -> ()
-				builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-					_ = stack
-				}), params, results).Export(name)
-				continue
-			default:
-				return fmt.Errorf("unsupported import function: %s.%s", modName, name)
-			}
-		}
 
 		switch name {
 		case "__wbg_randomFillSync_ac0988aba3254290", "__wbg_getRandomValues_b8f5dbd5f3995a9e":
@@ -111,75 +91,10 @@ func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazer
 				}
 			})
 			builder.NewFunctionBuilder().WithGoModuleFunction(fn, params, results).Export(name)
-		case "__wbindgen_object_drop_ref":
-			// (param i32) -> () : ignore drops
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				// no-op
-			}), params, results).Export(name)
-		case "__wbindgen_object_clone_ref":
-			// (param i32) (result i32) -> identity
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				// leave stack[0] as-is
-			}), params, results).Export(name)
-		case "__wbindgen_describe":
-			// (param i32) -> () used by wasm-bindgen for type descriptions; no-op
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				_ = stack
-			}), params, results).Export(name)
-		case "__wbg_crypto_574e78ad8b13b65f", "__wbg_msCrypto_a61aeb35a24c1329":
-			// (param i32) (result i32) -> identity: pass-through a non-null handle
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				// leave stack[0] unchanged
-			}), params, results).Export(name)
 		case "__wbindgen_is_object":
 			// (param i32) (result i32) -> return 1 (truthy)
 			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
 				stack[0] = api.EncodeU32(1)
-			}), params, results).Export(name)
-		case "__wbindgen_is_function", "__wbindgen_is_string", "__wbindgen_is_undefined":
-			// (param i32) (result i32) -> return 0 (falsy)
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				stack[0] = api.EncodeU32(0)
-			}), params, results).Export(name)
-		case "__wbg_process_dc0fbacc7c1c06f7", "__wbg_versions_c01dfd4722a88165", "__wbg_node_905d3e251edff8a2":
-			// Node detection related: return 0 (null/undefined) to avoid Node path
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				stack[0] = api.EncodeU32(0)
-			}), params, results).Export(name)
-		case "__wbg_require_60cc747a6bc5215a":
-			// (result i32) -> return 0 to indicate require() not available
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				stack[0] = api.EncodeU32(0)
-			}), params, results).Export(name)
-		case "__wbindgen_string_new":
-			// (param i32 i32) (result i32) -> return 0 as dummy string handle
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				stack[0] = api.EncodeU32(0)
-			}), params, results).Export(name)
-		case "__wbg_newnoargs_105ed471475aaf50":
-			// (param i32 i32) (result i32) -> return 0
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				stack[0] = api.EncodeU32(0)
-			}), params, results).Export(name)
-		case "__wbg_call_672a4d21634d4a24":
-			// (param i32 i32) (result i32) -> return 0
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				stack[0] = api.EncodeU32(0)
-			}), params, results).Export(name)
-		case "__wbg_call_7cccdd69e0791ae2":
-			// (param i32 i32 i32) (result i32) -> return 0
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				stack[0] = api.EncodeU32(0)
-			}), params, results).Export(name)
-		case "__wbg_static_accessor_GLOBAL_THIS_56578be7e9f832b0", "__wbg_static_accessor_SELF_37c5d418e4bf5819", "__wbg_static_accessor_WINDOW_5de37043a91a9c40", "__wbg_static_accessor_GLOBAL_88a902d13a557d07":
-			// (result i32) -> return 0
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				stack[0] = api.EncodeU32(0)
-			}), params, results).Export(name)
-		case "__wbg_buffer_609cc3eee51ed158":
-			// (param i32) (result i32) -> return 0
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				stack[0] = api.EncodeU32(0)
 			}), params, results).Export(name)
 		case "__wbg_newwithbyteoffsetandlength_d97e637ebe145a9a":
 			// (param i32 i32 i32) (result i32): returns a synthesized handle equal to byte_offset and records length.
@@ -188,11 +103,6 @@ func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazer
 				length := api.DecodeU32(stack[2])
 				taLen[byteOffset] = length
 				stack[0] = api.EncodeU32(byteOffset)
-			}), params, results).Export(name)
-		case "__wbg_new_a12002a7f91c75be":
-			// (param i32) (result i32) -> return 0
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				stack[0] = api.EncodeU32(0)
 			}), params, results).Export(name)
 		case "__wbg_set_65595bdd868b3009":
 			// (param i32 i32 i32) -> copy from src_handle to dst_ptr using recorded length
@@ -209,11 +119,6 @@ func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazer
 					_ = mem.Write(dstPtr, buf)
 				}
 			}), params, results).Export(name)
-		case "__wbg_newwithlength_a381634e90c276d4":
-			// (param i32) (result i32) -> return 0
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				stack[0] = api.EncodeU32(0)
-			}), params, results).Export(name)
 		case "__wbg_subarray_aa9065fa9dc5df96":
 			// (param i32 i32 i32) (result i32): return a new handle = base+begin and record length = end-begin
 			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
@@ -228,62 +133,13 @@ func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazer
 				taLen[newHandle] = l
 				stack[0] = api.EncodeU32(newHandle)
 			}), params, results).Export(name)
-		case "__wbindgen_throw":
-			// (param i32 i32) -> () read string and panic
-			builder.NewFunctionBuilder().WithGoModuleFunction(api.GoModuleFunc(func(ctx context.Context, m api.Module, stack []uint64) {
-				mem := m.Memory()
-				ptr := api.DecodeU32(stack[0])
-				len := api.DecodeU32(stack[1])
-				msgBytes, ok := mem.Read(ptr, len)
-				if !ok {
-					panic("__wbindgen_throw: out of memory range")
-				}
-				panic("__wbindgen_throw: " + string(msgBytes))
-			}), params, results).Export(name)
-		case "__wbindgen_memory":
-			// (result i32) -> return 0 as dummy memory handle
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				stack[0] = api.EncodeU32(0)
-			}), params, results).Export(name)
 		default:
-			// Provide minimal stubs for common wasm-bindgen placeholder helpers to avoid panics
-			if modName == "__wbindgen_placeholder__" {
-				switch name {
-				case "__wbindgen_number_get":
-					// wasm-bindgen often uses (param i32 i32) -> () to write a flag and f64 into wasm memory.
-					// However signatures can vary with transforms. We just match the compiled signature dynamically.
-					// If there is 1 result, return 0. If there are 2 results, return 0 in both. If there are params, zero them out.
-					builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-						// If function returns something, leave zeros on the stack (already zeroed by wazero before call).
-						// If it expects to set a non-null sentinel, put 0.
-						for i := range stack {
-							stack[i] = 0
-						}
-					}), params, results).Export(name)
-					break
-				case "__wbindgen_number_new":
-					// (param f64) (result i32) usually allocates a JS number handle; we return 0 (dummy handle)
-					builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-						stack[0] = api.EncodeU32(0)
-					}), params, results).Export(name)
-					break
-				case "__wbindgen_boolean_get":
-					// Return 0
-					builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-						stack[0] = api.EncodeU32(0)
-					}), params, results).Export(name)
-					break
-				default:
-					// Generic fallback: export a no-op stub matching the signature, returning zeros.
-					builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-						for i := range stack {
-							stack[i] = 0
-						}
-					}), params, results).Export(name)
-				}
-				break
-			}
-			return fmt.Errorf("unsupported import function: %s.%s", modName, name)
+			// Passthrough default: export a function matching the signature that leaves inputs/results unchanged or zeroed.
+			// We avoid special-casing stub names; any unrecognized import gets a no-op implementation.
+			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
+				// By default, do nothing. Wazero pre-zeros the stack slots for results, so this acts as a safe passthrough.
+				_ = stack
+			}), params, results).Export(name)
 		}
 	}
 

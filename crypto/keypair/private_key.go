@@ -36,7 +36,6 @@ func (self PrivateKey) ToString() (string, error) {
 		panic(err)
 	}
 	outPtr := results[0]
-	println(outPtr)
 
 	_, err = function.Call(self.context, outPtr, self.ptr)
 	if err != nil {
@@ -52,19 +51,15 @@ func (self PrivateKey) ToString() (string, error) {
 	strPtr := binary.LittleEndian.Uint32(buf[0:4])
 	strLen := binary.LittleEndian.Uint32(buf[4:8])
 
-	println(strPtr, strLen)
-
 	// étape 4 : lire la vraie string UTF-8
 	strBytes, ok := mem.Read(strPtr, strLen)
 	if !ok {
 		panic("cannot read string")
 	}
-	println(len(strBytes))
 	s := string(strBytes)
-	fmt.Println("Rust returned:", s)
 
 	_, _ = free.Call(self.context, uint64(strPtr), uint64(strLen))
 	_, _ = free.Call(self.context, outPtr, 8)
 
-	return "", nil
+	return s, nil
 }

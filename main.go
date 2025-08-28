@@ -39,8 +39,6 @@ func createkeypair(module api.Module, goContext context.Context) {
 		println("keypair.GetPrivateKey error:", err.Error())
 	}
 
-	fmt.Printf("Privatekey %+v\n", privateKey)
-
 	privateKeyString, err := privateKey.ToString()
 	if err != nil {
 		println("privateKey.ToString error:", err.Error())
@@ -82,36 +80,5 @@ func main() {
 
 	createkeypair(module, goContext)
 	createkeypair(module, goContext)
-
-	//add := module.ExportedFunction(addFunction)
-	//if add == nil {
-	//	panic("exported function 'add' not found")
-	//}
-
-	//// Prepare data in wasm memory and pass (ptr, len) as raw C ABI slice
-	//mem := module.Memory()
-	//if mem == nil {
-	//	panic("module has no exported memory")
-	//}
-	//
-	//data := []byte("toto")
-	//// Naive placement: write at offset 0x100 (avoid potential null region)
-	//const offset = uint32(0x100)
-	//if ok := mem.Write(offset, data); !ok {
-	//	panic("failed to write data into wasm memory")
-	//}
-	//
-	//// Call add(a: i64, b: i64, data: &[u8]) -> i64
-	//// wazero uses uint64 for all stack values; i64 is passed as uint64 bitwise
-	//result, err := add.Call(goContext, uint64(1), uint64(2), uint64(offset), uint64(len(data)), 1)
-	//if err != nil {
-	//	panic(err)
-	//}
-	//
-	//if len(result) == 0 {
-	//	panic("no result returned from add")
-	//}
-	//// The function returns i64; wazero uses uint64 for stack values.
-	//println(uint64(result[0]))
 
 }

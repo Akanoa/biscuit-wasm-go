@@ -42,7 +42,6 @@ func (self *KeyPair) New(signatureAlgorithm SignatureAlgorithm) error {
 
 	self.ptr = result[0]
 
-	println("Inside the keypair")
 	return nil
 }
 

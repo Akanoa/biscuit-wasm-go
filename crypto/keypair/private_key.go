@@ -1,65 +1,119 @@
 package keypair
 
 import (
-	"context"
+	"biscuit-wasm-go/wasm"
 	"encoding/binary"
 	"fmt"
-
-	"github.com/tetratelabs/wazero/api"
+	"log/slog"
 )
 
 type PrivateKey struct {
-	context context.Context
-	module  api.Module
-	ptr     uint64
+	env wasm.WasmEnv
+	ptr uint64
 }
 
-func NonePrivateKey(context context.Context, module api.Module) PrivateKey {
-	return PrivateKey{context: context, module: module, ptr: 0}
+func InvokePrivateKey(env wasm.WasmEnv) PrivateKey {
+	return PrivateKey{env: env, ptr: 0}
 }
 
 func (self PrivateKey) ToString() (string, error) {
 	if self.ptr == 0 {
-		return "", fmt.Errorf("public key not initialized")
+		slog.Error("private key not initialized")
+		return "", fmt.Errorf("private key not initialized")
 	}
 
-	function := self.module.ExportedFunction("privatekey_toString")
-	if function == nil {
-		return "", fmt.Errorf("exported function 'privatekey_toString' not found")
-	}
-
-	malloc := self.module.ExportedFunction("__wbindgen_malloc")
-	free := self.module.ExportedFunction("__wbindgen_free")
-
-	results, err := malloc.Call(self.context, 8, 1)
+	function, err := self.env.GetFunction("privatekey_toString")
 	if err != nil {
-		panic(err)
+		slog.Error("exported function 'privatekey_toString' not found")
+		return "", err
 	}
-	outPtr := results[0]
 
-	_, err = function.Call(self.context, outPtr, self.ptr)
+	outPtr, err := self.env.Malloc(8)
 	if err != nil {
-		panic(err)
+		slog.Error("malloc failed:", err)
+		return "", err
 	}
 
-	// étape 3 : lire ptr,len depuis mémoire wasm
-	mem := self.module.Memory()
-	buf, ok := mem.Read(uint32(outPtr), 8)
+	_, err = self.env.Call(function, outPtr, self.ptr)
+	if err != nil {
+		slog.Error("privatekey_toString failed:", err)
+		return "", err
+	}
+
+	return self.env.GetStringValueFromPointer(outPtr)
+}
+
+func (self *PrivateKey) FromString(data string) error {
+	// Note: Go strings are UTF-8 already. We must copy bytes into WASM memory
+	// and pass (ptr, len) according to wasm-bindgen ABI.
+
+	function, err := self.env.GetFunction("privatekey_fromString")
+	if err != nil {
+		return err
+	}
+
+	mem, err := self.env.GetMemory()
+	if err != nil {
+		return fmt.Errorf("exported memory not found")
+	}
+
+	size := uint64(16)
+
+	// Allocate return area (3 u32 values: value_ptr, error_ptr, is_err)
+	retPtr, err := self.env.Malloc(size)
+	if err != nil {
+		return fmt.Errorf("malloc for return area failed: %w", err)
+	}
+
+	// Prepare UTF-8 bytes from data
+	bytes := []byte(data)
+	// Allocate buffer for string bytes
+	strPtr, err := self.env.Malloc(uint64(len(bytes)))
+	if err != nil {
+		_ = self.env.Free(retPtr, size)
+		return fmt.Errorf("malloc for string failed: %w", err)
+	}
+
+	// Write bytes into memory
+	if ok := mem.Write(uint32(strPtr), bytes); !ok {
+
+		_ = self.env.Free(retPtr, size)
+		_ = self.env.Free(strPtr, uint64(len(bytes)))
+
+		return fmt.Errorf("cannot write string bytes to wasm memory")
+	}
+
+	// Call: privatekey_fromString(out_ptr, str_ptr, str_len)
+	_, err = self.env.Call(function, retPtr, strPtr, uint64(len(bytes)))
+	if err != nil {
+		_ = self.env.Free(retPtr, size)
+		_ = self.env.Free(strPtr, uint64(len(bytes)))
+		return fmt.Errorf("privatekey_fromString failed: %w", err)
+	}
+
+	// Read result triple
+	buf, ok := mem.Read(uint32(retPtr), uint32(size))
 	if !ok {
-		panic("cannot read return area")
+		_ = self.env.Free(retPtr, size)
+		_ = self.env.Free(strPtr, uint64(len(bytes)))
+		return fmt.Errorf("cannot read return area")
 	}
-	strPtr := binary.LittleEndian.Uint32(buf[0:4])
-	strLen := binary.LittleEndian.Uint32(buf[4:8])
+	valuePtr := binary.LittleEndian.Uint32(buf[0:4])
+	errPtr := binary.LittleEndian.Uint32(buf[4:8])
+	isErr := int32(binary.LittleEndian.Uint32(buf[8:12]))
 
-	// étape 4 : lire la vraie string UTF-8
-	strBytes, ok := mem.Read(strPtr, strLen)
-	if !ok {
-		panic("cannot read string")
+	// Free the temporary inputs and return area
+	_ = self.env.Free(retPtr, size)
+	_ = self.env.Free(strPtr, uint64(len(bytes)))
+
+	fmt.Println("isErr", isErr)
+	fmt.Println("errIdx", errPtr)
+
+	if isErr != 0 {
+
+		return fmt.Errorf("privatekey_fromString: unknown error (externref #%d)", errPtr)
 	}
-	s := string(strBytes)
 
-	_, _ = free.Call(self.context, uint64(strPtr), uint64(strLen))
-	_, _ = free.Call(self.context, outPtr, 8)
-
-	return s, nil
+	self.ptr = uint64(valuePtr)
+	return nil
 }

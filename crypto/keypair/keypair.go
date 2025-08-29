@@ -1,10 +1,9 @@
 package keypair
 
 import (
-	"context"
+	"biscuit-wasm-go/wasm"
 	"fmt"
-
-	"github.com/tetratelabs/wazero/api"
+	"log/slog"
 )
 
 type SignatureAlgorithm int
@@ -15,23 +14,23 @@ const (
 )
 
 type KeyPair struct {
-	module  api.Module
-	context context.Context
-	ptr     uint64
+	env wasm.WasmEnv
+	ptr uint64
 }
 
-func Invoke(module api.Module, context context.Context) *KeyPair {
-	KeyPair := &KeyPair{module: module, context: context, ptr: 0}
+func Invoke(env wasm.WasmEnv) *KeyPair {
+	KeyPair := &KeyPair{env: env, ptr: 0}
 	return KeyPair
 }
 
 func (self *KeyPair) New(signatureAlgorithm SignatureAlgorithm) error {
-	function := self.module.ExportedFunction("keypair_new")
-	if function == nil {
-		return fmt.Errorf("exported function 'keypair_new' not found")
+
+	function, err := self.env.GetFunction("keypair_new")
+	if err != nil {
+		return err
 	}
 
-	result, err := function.Call(self.context, uint64(signatureAlgorithm))
+	result, err := self.env.Call(function, uint64(signatureAlgorithm))
 	if err != nil {
 		return fmt.Errorf("keypair_new failed: %w", err)
 	}
@@ -48,51 +47,72 @@ func (self *KeyPair) New(signatureAlgorithm SignatureAlgorithm) error {
 func (self *KeyPair) GetPublicKey() (PublicKey, error) {
 
 	if self.ptr == 0 {
-		return NonePublicKey(self.context, self.module), fmt.Errorf("keypair not initialized")
+		slog.Error("keypair not initialized")
+		return PublicKey{}, fmt.Errorf("keypair not initialized")
 	}
 
-	function := self.module.ExportedFunction("keypair_getPublicKey")
-	if function == nil {
-		return NonePublicKey(self.context, self.module), fmt.Errorf("exported function 'keypair_getPublicKey' not found")
+	function, err := self.env.GetFunction("keypair_getPublicKey")
+	if function != nil {
+		slog.Error("exported function 'keypair_getPublicKey' not found")
+		return PublicKey{}, err
 	}
 
-	result, err := function.Call(self.context, uint64(self.ptr))
-
+	result, err := self.env.Call(function, self.ptr)
 	if err != nil {
-		return NonePublicKey(self.context, self.module), fmt.Errorf("keypair_getPublicKey failed: %w", err)
+		slog.Error("keypair_getPublicKey failed:", err)
+		return PublicKey{}, err
 	}
 
 	return PublicKey{
-		ptr:     result[0],
-		module:  self.module,
-		context: self.context,
+		ptr: result[0],
+		env: self.env,
 	}, nil
 }
 
 func (self *KeyPair) GetPrivateKey() (PrivateKey, error) {
 
 	if self.ptr == 0 {
-		return NonePrivateKey(self.context, self.module), fmt.Errorf("keypair not initialized")
+		return PrivateKey{}, fmt.Errorf("keypair not initialized")
 	}
 
-	function := self.module.ExportedFunction("keypair_getPrivateKey")
-	if function == nil {
-		return NonePrivateKey(self.context, self.module), fmt.Errorf("exported function 'keypair_getPrivateKey' not found")
-	}
-
-	result, err := function.Call(self.context, self.ptr)
-
+	function, err := self.env.GetFunction("keypair_getPrivateKey")
 	if err != nil {
-		return NonePrivateKey(self.context, self.module), fmt.Errorf("keypair_getPrivateKey failed: %w", err)
+		slog.Error("exported function 'keypair_getPrivateKey' not found")
+		return PrivateKey{}, err
+	}
+
+	result, err := self.env.Call(function, self.ptr)
+	if err != nil {
+		slog.Error("keypair_getPrivateKey failed:", err)
+		return PrivateKey{}, err
 	}
 
 	return PrivateKey{
-		ptr:     result[0],
-		module:  self.module,
-		context: self.context,
+		ptr: result[0],
+		env: self.env,
 	}, nil
 }
 
-//func KeyPair(signatureAlgorithm SignatureAlgorithm) {
-//	println("Inside the keypair", signatureAlgorithm)
-//}
+func (self *KeyPair) FromPrivateKey(privateKey PrivateKey) error {
+
+	function, err := self.env.GetFunction("keypair_fromPrivateKey")
+	if err != nil {
+		slog.Error("exported function 'keypair_fromPrivateKey' not found")
+		return err
+	}
+
+	result, err := self.env.Call(function, privateKey.ptr)
+
+	if err != nil {
+		slog.Error("keypair_fromPrivateKey failed:", err)
+		return err
+	}
+
+	if len(result) == 0 {
+		return fmt.Errorf("no result returned from keypair_fromPrivateKey")
+	}
+
+	self.ptr = result[0]
+
+	return nil
+}

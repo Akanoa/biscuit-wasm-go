@@ -1,8 +1,9 @@
-package main
+package wasm
 
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 
 	"github.com/tetratelabs/wazero"
@@ -13,6 +14,17 @@ import (
 // to its length. This lets entropy functions and copy helpers know where and how
 // many bytes to read/write in guest memory.
 var taLen = map[uint32]uint32{}
+
+// externrefTableSize tracks the logical size of the wasm-bindgen externref table when hosted in Go.
+var externrefTableSize uint32
+
+// externrefTableMirror mirrors the wasm-bindgen externref table so Go code can inspect entries.
+// Index 0 is reserved (undefined), and init seeds [undefined, null, true, false] similar to the JS glue.
+var externrefTableMirror []any
+
+var mapString = map[string]uint64{}
+
+type jsNull struct{}
 
 // InstantiateImportStubs inspects the compiled module and creates host modules for each imported module,
 // exporting no-op functions that match the imported function signatures. This satisfies imports such as
@@ -47,6 +59,22 @@ func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazer
 		results := def.ResultTypes()
 
 		switch name {
+		case "__wbindgen_init_externref_table":
+			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
+				if len(externrefTableMirror) == 0 {
+					externrefTableMirror = append(externrefTableMirror, nil)
+				}
+				offset := uint32(len(externrefTableMirror))
+				for i := 0; i < 4; i++ {
+					externrefTableMirror = append(externrefTableMirror, nil)
+				}
+				externrefTableMirror[offset+0] = nil
+				externrefTableMirror[offset+1] = jsNull{}
+				externrefTableMirror[offset+2] = true
+				externrefTableMirror[offset+3] = false
+				externrefTableSize = uint32(len(externrefTableMirror))
+				_ = stack
+			}), params, results).Export(name)
 		case "__wbg_randomFillSync_ac0988aba3254290", "__wbg_getRandomValues_b8f5dbd5f3995a9e":
 			// Signature in this wasm-bindgen glue: (param i32 i32) -> () where params are (obj_handle, typed_array_handle)
 			// We synthesize typed array handles equal to byte offsets into wasm memory and track their lengths.
@@ -95,6 +123,57 @@ func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazer
 			// (param i32) (result i32) -> return 1 (truthy)
 			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
 				stack[0] = api.EncodeU32(1)
+			}), params, results).Export(name)
+		case "__wbindgen_string_new":
+			// Convert Rust string (ptr,len) to a JS handle (index) by storing it in the externref table mirror.
+			builder.NewFunctionBuilder().WithGoModuleFunction(api.GoModuleFunc(func(ctx context.Context, m api.Module, stack []uint64) {
+				mem := m.Memory()
+				ptr := api.DecodeU32(stack[0])
+				ln := api.DecodeU32(stack[1])
+				var s string
+				idxString := uint64(len(externrefTableMirror))
+
+				// If the string is empty, return 0.
+				if ln == 0 {
+					stack[0] = api.EncodeU32(0)
+					return
+				}
+
+				// Read string from memory.
+				buf, ok := mem.Read(ptr, ln)
+
+				// If the read failed, return 0.
+				if !ok {
+					fmt.Println("failed to read string from memory")
+					return
+				}
+
+				// calculate hash of string
+				h := sha256.Sum256(buf)
+				key := fmt.Sprintf("---- %x", h)
+
+				// Ensure table has reserved 0 entry.
+				if len(externrefTableMirror) == 0 {
+					externrefTableMirror = append(externrefTableMirror, nil)
+				}
+
+				// search for string in map
+				if idx, ok := mapString[key]; ok {
+					s = externrefTableMirror[idx].(string)
+					idxString = idx
+				} else {
+					s = string(buf)
+					idxString = uint64(len(externrefTableMirror))
+					externrefTableMirror = append(externrefTableMirror, s)
+					mapString[key] = idxString
+
+				}
+
+				externrefTableSize = uint32(uint64(len(externrefTableMirror)))
+
+				fmt.Println("string_new: ", s, " idx: ", idxString)
+
+				stack[0] = api.EncodeU32(uint32(idxString))
 			}), params, results).Export(name)
 		case "__wbg_newwithbyteoffsetandlength_d97e637ebe145a9a":
 			// (param i32 i32 i32) (result i32): returns a synthesized handle equal to byte_offset and records length.

@@ -24,14 +24,16 @@ var ExternrefTableMirror []any
 
 // synthetic handles for JS-like singletons and typed arrays
 var (
-	globalObjHandle      uint32
-	cryptoObjHandle      uint32
-	memoryObjHandle      uint32
-	bufferObjHandle      uint32
-	functionNoArgsHandle uint32
-	// Start synthetic typed array handles in a high range to avoid colliding with wasm memory pointers
-	taHandleNext uint32 = 0x80000000
-)
+		globalObjHandle      uint32
+		cryptoObjHandle      uint32
+		memoryObjHandle      uint32
+		bufferObjHandle      uint32
+		functionNoArgsHandle uint32
+		// Start synthetic typed array handles in a high range to avoid colliding with wasm memory pointers
+		taHandleNext uint32 = 0x80000000
+		// taBuf stores JS-allocated typed array contents (not backed by wasm memory)
+		taBuf = map[uint32][]byte{}
+	)
 
 type JsNull struct{}
 
@@ -105,11 +107,23 @@ func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazer
 		case "__wbg_randomFillSync_ac0988aba3254290", "__wbg_getRandomValues_b8f5dbd5f3995a9e":
 			// Signature in this wasm-bindgen glue: (param i32 i32) -> () where params are (obj_handle, typed_array_handle)
 			// We synthesize typed array handles equal to byte offsets into wasm memory and track their lengths.
-			fn := api.GoModuleFunc(func(ctx context.Context, m api.Module, stack []uint64) {
+   fn := api.GoModuleFunc(func(ctx context.Context, m api.Module, stack []uint64) {
 				mem := m.Memory()
 				_ = api.DecodeU32(stack[0]) // obj_handle not needed
 				arr := api.DecodeU32(stack[1])
 				ln := taLen[arr]
+				// If this handle refers to a JS-allocated buffer, fill that instead
+				if bufJS, ok := taBuf[arr]; ok {
+					if n, err := rand.Read(bufJS); err == nil {
+						if uint32(n) < uint32(len(bufJS)) {
+							for i := n; i < len(bufJS); i++ {
+								bufJS[i] = 0
+							}
+						}
+					}
+					return
+				}
+				// Otherwise, treat the handle as a wasm memory offset
 				if ln == 0 {
 					return
 				}
@@ -414,6 +428,12 @@ func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazer
 				// dst_array_handle := api.DecodeU32(stack[0]) // unused
 				srcHandle := api.DecodeU32(stack[1])
 				dstPtr := api.DecodeU32(stack[2])
+				// If source is a JS-allocated buffer, write it directly
+				if jsb, ok := taBuf[srcHandle]; ok {
+					_ = mem.Write(dstPtr, jsb)
+					return
+				}
+				// Otherwise, treat as a wasm memory-backed typed array
 				ln := taLen[srcHandle]
 				if ln == 0 {
 					return
@@ -424,15 +444,29 @@ func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazer
 			}), params, results).Export(name)
 		case "__wbg_subarray_aa9065fa9dc5df96":
 			// (param i32 i32 i32) (result i32): return a new handle = base+begin and record length = end-begin
-			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
+   builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
 				base := api.DecodeU32(stack[0])
 				begin := api.DecodeU32(stack[1])
 				end := api.DecodeU32(stack[2])
-				newHandle := base + begin
 				var l uint32
 				if end >= begin {
 					l = end - begin
 				}
+				// If base is a JS-allocated buffer, create a new JS handle for the subarray
+				if buf, ok := taBuf[base]; ok {
+					start := int(begin)
+					stop := int(end)
+					if start < 0 { start = 0 }
+					if stop > len(buf) { stop = len(buf) }
+					if stop < start { stop = start }
+					h := taHandleNext
+					taHandleNext++
+					taBuf[h] = buf[start:stop]
+					stack[0] = api.EncodeU32(h)
+					return
+				}
+				// Otherwise, treat base as a wasm memory offset and return adjusted offset
+				newHandle := base + begin
 				taLen[newHandle] = l
 				stack[0] = api.EncodeU32(newHandle)
 			}), params, results).Export(name)
@@ -462,11 +496,13 @@ func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazer
 				stack[0] = api.EncodeU32(cryptoObjHandle)
 			}), params, results).Export(name)
 		case "__wbg_newwithlength_a381634e90c276d4":
-			// new Uint8Array(length)
+			// new Uint8Array(length) -> create a JS-allocated buffer and return a synthetic handle
 			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
 				length := api.DecodeU32(stack[0])
 				h := taHandleNext
 				taHandleNext++
+				// allocate a JS-backed buffer and record its length
+				taBuf[h] = make([]byte, length)
 				taLen[h] = length
 				stack[0] = api.EncodeU32(h)
 			}), params, results).Export(name)

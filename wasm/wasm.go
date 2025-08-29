@@ -190,7 +190,7 @@ func (env WasmEnv) GetError(idx uint64) (string, error) {
 	case map[string]interface{}:
 		ret := ""
 		for key, value := range data {
-			ret += fmt.Sprintf("%s: %v\n", key, value)
+			ret += fmt.Sprintf("%s: %v", key, value)
 		}
 		return ret, nil
 	}

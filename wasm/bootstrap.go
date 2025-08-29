@@ -165,7 +165,6 @@ func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazer
 		case "__wbindgen_is_undefined":
 			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
 				idx := api.DecodeU32(stack[0])
-				fmt.Println("--------------------", idx, len(ExternrefTableMirror))
 				var v any
 				if idx < uint32(len(ExternrefTableMirror)) {
 					v = ExternrefTableMirror[idx]
@@ -499,22 +498,15 @@ func InstantiateImportStubs(ctx context.Context, runtime wazero.Runtime, c wazer
 				if len(ExternrefTableMirror) == 0 {
 					ExternrefTableMirror = append(ExternrefTableMirror, nil)
 				}
-
-				fmt.Println("was here new")
 				ExternrefTableMirror = append(ExternrefTableMirror, map[string]any{})
-				fmt.Println(ExternrefTableMirror)
-				fmt.Println(len(ExternrefTableMirror) - 1)
 				stack[0] = api.EncodeU32(uint32(len(ExternrefTableMirror) - 1))
 			}), params, results).Export(name)
 		case "__wbg_set_3f1d0b984ed272ed":
 			// Reflect.set(target, key, value) -> bool
 			builder.NewFunctionBuilder().WithGoFunction(api.GoFunc(func(ctx context.Context, stack []uint64) {
-				fmt.Println("was here set")
 				target := api.DecodeU32(stack[0])
 				key := api.DecodeU32(stack[1])
 				val := api.DecodeU32(stack[2])
-				fmt.Println(target, key, val)
-				fmt.Println(ExternrefTableMirror)
 				ok := uint32(0)
 				if int(target) < len(ExternrefTableMirror) {
 					obj := ExternrefTableMirror[target]

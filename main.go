@@ -5,6 +5,8 @@ import (
 	"biscuit-wasm-go/wasm"
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -24,36 +26,52 @@ func closeWasmModule(module api.Module, goContext context.Context) {
 	}
 }
 
-func createkeypair(env wasm.WasmEnv, algorithm keypairModule.SignatureAlgorithm) *keypairModule.KeyPair {
+func createkeypair(env wasm.WasmEnv, algorithm keypairModule.SignatureAlgorithm) (*keypairModule.KeyPair, error) {
 	keypair := keypairModule.Invoke(env)
 
 	if err := keypair.New(algorithm); err != nil {
-		println("keypair.New error:", err.Error())
+		slog.Error(err.Error())
+		return nil, err
 	}
 
 	privateKey, err := keypair.GetPrivateKey()
 	if err != nil {
-		println("keypair.GetPrivateKey error:", err.Error())
+		slog.Error(err.Error())
+		return nil, err
 	}
 
 	privateKeyString, err := privateKey.ToString()
 	if err != nil {
-		println("privateKey.ToString error:", err.Error())
+		slog.Error(err.Error())
+		return nil, err
 	}
 	fmt.Printf("PrivateKeyString %s\n", privateKeyString)
 
-	return keypair
+	return keypair, nil
 }
 
 func main() {
+
+	opts := &slog.HandlerOptions{
+		AddSource: true,
+		Level:     slog.LevelDebug,
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, opts))
+
+	slog.SetDefault(logger)
+
 	env, err := wasm.InitWasm()
 	if err != nil {
 		panic(err)
 	}
 
-	//keypair1 := createkeypair(env, keypairModule.Ed25519)
-	////createkeypair(module, ctx, keypairModule.Secp256r1)
-	//
+	//keypair1, err := createkeypair(env, keypairModule.Ed25519)
+	_, err = createkeypair(env, keypairModule.Ed25519)
+	if err != nil {
+		slog.Error(err.Error())
+		return
+	}
+
 	//privateKey1, err := keypair1.GetPrivateKey()
 	//if err != nil {
 	//	println("keypair1.GetPrivateKey error:", err.Error())
@@ -87,14 +105,15 @@ func main() {
 	//fmt.Println("From Keypair", privateKey2String)
 
 	privateKey3 := keypairModule.InvokePrivateKey(env)
-	err = privateKey3.FromString("ed25519-private/eacbce4ed1a4132e1c667ebe5f730f493197fd3def32027a87ea2233d5b55aba2")
+	err = privateKey3.FromString("ed25519-private/eacbce4ed1a4132e1c667ebe5f730f493197fd3def32027a87ea2233d5b55aba")
 	if err != nil {
-		println("privateKey3.FromString error:", err.Error())
+		slog.Error(err.Error())
+		return
 	}
 
 	privateKey3String, err := privateKey3.ToString()
 	if err != nil {
-		println("privateKey3.ToString error:", err.Error())
+		slog.Error(err.Error())
 		return
 	}
 	fmt.Println("From PrivateKey", privateKey3String)

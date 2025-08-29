@@ -24,7 +24,7 @@ type WasmEnv struct {
 func (env WasmEnv) GetFunction(name string) (api.Function, error) {
 	function := env.Module.ExportedFunction(name)
 	if function == nil {
- 	slog.Error("exported function not found", slog.String("name", name))
+		slog.Error("exported function not found", slog.String("name", name))
 		return nil, fmt.Errorf("exported function '%s' not found", name)
 	}
 	return function, nil
@@ -60,7 +60,7 @@ func InitWasm() (WasmEnv, error) {
 	// Create a new runtime
 	runtime := wazero.NewRuntime(ctx)
 
- var sourceWasm []byte
+	var sourceWasm []byte
 	var chosen string
 	var err error
 	for _, candidate := range wasmCandidates {
@@ -84,7 +84,7 @@ func InitWasm() (WasmEnv, error) {
 
 	// Auto-instantiate host stubs for any imported functions (e.g., from "__wbindgen_placeholder__").
 	if err := InstantiateImportStubs(ctx, runtime, compiled); err != nil {
- 	slog.Error("Unable to instantiate import stubs", slog.Any("err", err))
+		slog.Error("Unable to instantiate import stubs", slog.Any("err", err))
 		panic(nil)
 	}
 
@@ -94,7 +94,7 @@ func InitWasm() (WasmEnv, error) {
 	module, err := runtime.InstantiateModule(ctx, compiled, wasmConfig)
 
 	if err != nil {
- 	slog.Error("Unable to instantiate module", slog.Any("err", err))
+		slog.Error("Unable to instantiate module", slog.Any("err", err))
 		panic(nil)
 	}
 
@@ -107,7 +107,7 @@ func InitWasm() (WasmEnv, error) {
 func (env WasmEnv) Free(ptr uint64, length uint64) error {
 	free, err := env.GetFunction("__wbindgen_free")
 	if err != nil {
- 	slog.Error("exported function not found", slog.String("name", "__wbindgen_free"))
+		slog.Error("exported function not found", slog.String("name", "__wbindgen_free"))
 		return err
 	}
 	_, err = env.Call(free, ptr, length, 1)
@@ -117,7 +117,7 @@ func (env WasmEnv) Free(ptr uint64, length uint64) error {
 func (env WasmEnv) Malloc(length uint64) (uint64, error) {
 	malloc, err := env.GetFunction("__wbindgen_malloc")
 	if err != nil {
- 	slog.Error("exported function not found", slog.String("name", "__wbindgen_malloc"))
+		slog.Error("exported function not found", slog.String("name", "__wbindgen_malloc"))
 		return 0, err
 	}
 	results, err := env.Call(malloc, length, 1)
@@ -134,21 +134,38 @@ func (env WasmEnv) Malloc(length uint64) (uint64, error) {
 	return results[0], nil
 }
 
+// GetStringValueFromPointer string is a double-pointed value. The first pointer is a pointer to the return area,
+// ptr pointed to an 8-byte area with the following layout:
+// 0: 4 bytes: string pointer
+// 4: 4 bytes: string length
+// This second pointer is the actual string data, we read the length and decode the string from memory
+// and free the return area.
+//
+// Memory Layout Diagram:
+// +----------------+     +-------------------+
+// | Return Area    |     | String Data      |
+// | (8 bytes)      |     | (variable length)|
+// +----------------+     +-------------------+
+// | String Ptr   --|---->| Actual string    |
+// | String Length  |     | content...       |
+// +----------------+     +-------------------+
+//   ^
+//   |
+// ptr (input parameter)
+
 func (env WasmEnv) GetStringValueFromPointer(ptr uint64) (string, error) {
 
-	// étape 3 : lire ptr,len depuis mémoire wasm
+	// read return area
 	mem := env.Module.Memory()
 	buf, ok := mem.Read(uint32(ptr), 8)
 	if !ok {
-		slog.Error("cannot read return area 2222")
+		slog.Error("cannot read return area")
 		return "", fmt.Errorf("cannot read return area")
 	}
 	strPtr := binary.LittleEndian.Uint32(buf[0:4])
 	strLen := binary.LittleEndian.Uint32(buf[4:8])
 
-	fmt.Println("strPtr:", strPtr, "strLen:", strLen)
-
-	// étape 4 : lire la vraie string UTF-8
+	// decode string from memory
 	strBytes, ok := mem.Read(strPtr, strLen)
 	if !ok {
 		panic("cannot read string")
@@ -157,9 +174,24 @@ func (env WasmEnv) GetStringValueFromPointer(ptr uint64) (string, error) {
 
 	err := env.Free(uint64(strPtr), uint64(strLen))
 	if err != nil {
- 	slog.Error("cannot free string", slog.Uint64("ptr", uint64(strPtr)), slog.Uint64("len", uint64(strLen)))
+		slog.Error("cannot free string", slog.Uint64("ptr", uint64(strPtr)), slog.Uint64("len", uint64(strLen)))
 		return "", err
 	}
 
 	return stringData, nil
+}
+
+func (env WasmEnv) GetError(idx uint64) (string, error) {
+	switch data := ExternrefTableMirror[idx].(type) {
+	default:
+		return "", fmt.Errorf("unknown error type")
+	case string:
+		return data, nil
+	case map[string]interface{}:
+		ret := ""
+		for key, value := range data {
+			ret += fmt.Sprintf("%s: %v\n", key, value)
+		}
+		return ret, nil
+	}
 }

@@ -3,6 +3,7 @@ package keypair
 import (
 	"biscuit-wasm-go/wasm"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log/slog"
 )
@@ -106,32 +107,13 @@ func (self *PrivateKey) FromString(data string) error {
 	_ = self.env.Free(retPtr, size)
 	_ = self.env.Free(strPtr, uint64(len(bytes)))
 
-	fmt.Println("isErr", isErr)
-	fmt.Println("errIdx", errPtr)
-
 	if isErr != 0 {
 
-		fmt.Println(wasm.ExternrefTableMirror)
-
-		x := wasm.ExternrefTableMirror[errPtr]
-		switch v := x.(type) {
-		case string:
-			fmt.Printf("random() error: %s (idx %d)\n", v, errPtr)
-		case wasm.JsNull:
-			fmt.Printf("random() error: null (idx %d)\n", errPtr)
-		case nil:
-			fmt.Printf("random() error: undefined (idx %d)\n", errPtr)
-		case map[string]interface{}:
-			for k, v := range v {
-				fmt.Printf("MAP => %s: %#v\n", k, v)
-			}
-			fmt.Printf("MAP => random() error: %#v (idx %d)\n", v, errPtr)
-		default:
-			{
-				fmt.Printf("random() error: %#v (idx %d)\n", v, errPtr)
-				fmt.Printf("random() error handle idx %d: %#v\n", errPtr, v)
-			}
+		serr, err := self.env.GetError(uint64(errPtr))
+		if err != nil {
+			return fmt.Errorf("cannot get error string: %w", err)
 		}
+		return errors.New(serr)
 	}
 
 	self.ptr = uint64(valuePtr)

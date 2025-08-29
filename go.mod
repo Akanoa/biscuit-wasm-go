@@ -1,3 +1,5 @@
+//go:build js && wasm
+
 module biscuit-wasm-go
 
 go 1.24

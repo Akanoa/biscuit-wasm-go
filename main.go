@@ -87,7 +87,7 @@ func main() {
 	//fmt.Println("From Keypair", privateKey2String)
 
 	privateKey3 := keypairModule.InvokePrivateKey(env)
-	err = privateKey3.FromString("ed25519-private2/eacbce4ed1a4132e1c667ebe5f730f493197fd3def32027a87ea2233d5b55abf")
+	err = privateKey3.FromString("ed25519-private/eacbce4ed1a4132e1c667ebe5f730f493197fd3def32027a87ea2233d5b55aba2")
 	if err != nil {
 		println("privateKey3.FromString error:", err.Error())
 	}

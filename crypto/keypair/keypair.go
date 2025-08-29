@@ -59,7 +59,7 @@ func (self *KeyPair) GetPublicKey() (PublicKey, error) {
 
 	result, err := self.env.Call(function, self.ptr)
 	if err != nil {
-		slog.Error("keypair_getPublicKey failed:", err)
+ 	slog.Error("keypair_getPublicKey failed", slog.Any("err", err))
 		return PublicKey{}, err
 	}
 
@@ -83,7 +83,7 @@ func (self *KeyPair) GetPrivateKey() (PrivateKey, error) {
 
 	result, err := self.env.Call(function, self.ptr)
 	if err != nil {
-		slog.Error("keypair_getPrivateKey failed:", err)
+ 	slog.Error("keypair_getPrivateKey failed", slog.Any("err", err))
 		return PrivateKey{}, err
 	}
 
@@ -104,7 +104,7 @@ func (self *KeyPair) FromPrivateKey(privateKey PrivateKey) error {
 	result, err := self.env.Call(function, privateKey.ptr)
 
 	if err != nil {
-		slog.Error("keypair_fromPrivateKey failed:", err)
+ 	slog.Error("keypair_fromPrivateKey failed", slog.Any("err", err))
 		return err
 	}
 

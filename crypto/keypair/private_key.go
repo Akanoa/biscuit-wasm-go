@@ -30,13 +30,13 @@ func (self PrivateKey) ToString() (string, error) {
 
 	outPtr, err := self.env.Malloc(8)
 	if err != nil {
-		slog.Error("malloc failed:", err)
+		slog.Error("malloc failed", slog.Any("err", err))
 		return "", err
 	}
 
 	_, err = self.env.Call(function, outPtr, self.ptr)
 	if err != nil {
-		slog.Error("privatekey_toString failed:", err)
+		slog.Error("privatekey_toString failed", slog.Any("err", err))
 		return "", err
 	}
 
@@ -111,7 +111,27 @@ func (self *PrivateKey) FromString(data string) error {
 
 	if isErr != 0 {
 
-		return fmt.Errorf("privatekey_fromString: unknown error (externref #%d)", errPtr)
+		fmt.Println(wasm.ExternrefTableMirror)
+
+		x := wasm.ExternrefTableMirror[errPtr]
+		switch v := x.(type) {
+		case string:
+			fmt.Printf("random() error: %s (idx %d)\n", v, errPtr)
+		case wasm.JsNull:
+			fmt.Printf("random() error: null (idx %d)\n", errPtr)
+		case nil:
+			fmt.Printf("random() error: undefined (idx %d)\n", errPtr)
+		case map[string]interface{}:
+			for k, v := range v {
+				fmt.Printf("MAP => %s: %#v\n", k, v)
+			}
+			fmt.Printf("MAP => random() error: %#v (idx %d)\n", v, errPtr)
+		default:
+			{
+				fmt.Printf("random() error: %#v (idx %d)\n", v, errPtr)
+				fmt.Printf("random() error handle idx %d: %#v\n", errPtr, v)
+			}
+		}
 	}
 
 	self.ptr = uint64(valuePtr)

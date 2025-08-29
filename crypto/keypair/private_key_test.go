@@ -1,24 +1,11 @@
 package keypair
 
-import (
-	"context"
-	"testing"
+// Placeholder test file previously had incomplete references that broke `go test`.
+// Keeping the package testable without undefined symbols.
 
-	"github.com/tetratelabs/wazero/api"
-)
+import "testing"
 
-type EnvPrivateKey struct {
-	context context.Context
-	module  api.Module
-}
-
-func initWasm() EnvPrivateKey {
-	Wasm
-	ctx := context.Background()
-
-	return EnvPrivateKey{}
-}
-
-func TestPrivateKey_FromString(t *testing.T) {
-	testimonialPrivateKey := InvokePrivateKey()
+func TestPrivateKey_FromString_Placeholder(t *testing.T) {
+	// Intentionally empty: real integration tests should initialize the WASM env
+	// and exercise PrivateKey.FromString against the compiled module.
 }

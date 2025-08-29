@@ -11,7 +11,10 @@ import (
 	"github.com/tetratelabs/wazero/api"
 )
 
-const wasmFile = "target/wasm32-unknown-unknown/release/biscuit_wasm_go.wasm"
+var wasmCandidates = []string{
+	"target/wasm32-unknown-unknown/release/biscuit_wasm_go.wasm",
+	"target/wasm32-unknown-unknown/debug/biscuit_wasm_go.wasm",
+}
 
 type WasmEnv struct {
 	Ctx    context.Context
@@ -57,16 +60,25 @@ func InitWasm() (WasmEnv, error) {
 	// Create a new runtime
 	runtime := wazero.NewRuntime(ctx)
 
-	sourceWasm, err := os.ReadFile(wasmFile)
-	if err != nil {
- 	slog.Error("Unable to read wasm file", slog.String("file", wasmFile), slog.Any("err", err))
+ var sourceWasm []byte
+	var chosen string
+	var err error
+	for _, candidate := range wasmCandidates {
+		sourceWasm, err = os.ReadFile(candidate)
+		if err == nil {
+			chosen = candidate
+			break
+		}
+	}
+	if chosen == "" {
+		slog.Error("Unable to read wasm file from candidates", slog.Any("candidates", wasmCandidates), slog.Any("lastErr", err))
 		panic(nil)
 	}
 
 	// Compile module
 	compiled, err := runtime.CompileModule(ctx, sourceWasm)
 	if err != nil {
- 	slog.Error("Unable to compile wasm file", slog.String("file", wasmFile), slog.Any("err", err))
+		slog.Error("Unable to compile wasm file", slog.String("file", chosen), slog.Any("err", err))
 		panic(nil)
 	}
 
